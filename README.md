@@ -11,11 +11,7 @@ Siga os passos abaixo, estritamente nesta ordem, no terminal do seu Mac.
 Abra o terminal, navegue até a pasta `backend` do projeto e crie o ambiente virtual:
 
 ```bash
-<<<<<<< HEAD
-teste
-=======
-cd /Users/cnn-explainer-clone/backend
->>>>>>> e349fe94f28bef368ad78d68bd5616643100b3d0
+
 python3 -m venv venv
 ```
 
