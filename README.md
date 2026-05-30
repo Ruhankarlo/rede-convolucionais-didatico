@@ -11,7 +11,11 @@ Siga os passos abaixo, estritamente nesta ordem, no terminal do seu Mac.
 Abra o terminal, navegue até a pasta `backend` do projeto e crie o ambiente virtual:
 
 ```bash
+<<<<<<< HEAD
 teste
+=======
+cd /Users/cnn-explainer-clone/backend
+>>>>>>> e349fe94f28bef368ad78d68bd5616643100b3d0
 python3 -m venv venv
 ```
 
@@ -35,7 +39,7 @@ python train_and_convert.py
 Abra uma **nova aba** no terminal (ou utilize a mesma se desejar, mas lembre-se de ir para a pasta do frontend):
 
 ```bash
-cd /Users/karan/Github/cnn-explainer-clone/frontend
+cd /Users/cnn-explainer-clone/frontend
 ```
 
 Instale as dependências usando NPM:
