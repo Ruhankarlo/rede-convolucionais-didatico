@@ -1,3 +1,5 @@
 backend/venv/
 venv/
 .env
+frontend/package-lock.json
+frontend/public/model
