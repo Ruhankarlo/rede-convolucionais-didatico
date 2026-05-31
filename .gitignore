@@ -9,3 +9,6 @@ env/
 # Arquivos locais do sistema
 .DS_Store
 Thumbs.db
+
+frontend/package-lock.json
+frontend/public/model
