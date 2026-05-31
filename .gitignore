@@ -1,5 +1,14 @@
-backend/venv/
+# Ignorar dependências do Node
+node_modules/
+
+# Ignorar o ambiente virtual do Python 
+.venv/
 venv/
-.env
+env/
+
+# Arquivos locais do sistema
+.DS_Store
+Thumbs.db
+
 frontend/package-lock.json
 frontend/public/model
