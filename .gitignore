@@ -12,3 +12,4 @@ Thumbs.db
 
 frontend/package-lock.json
 frontend/public/model
+node_modules
