@@ -1,33 +1,27 @@
 import * as tf from '@tensorflow/tfjs';
 
 // ============================================================
-// ARQUITETURA: Transfer Learning com MobileNet
-// O MobileNet foi treinado no ImageNet (14 milhões de imagens).
-// Usamos ele apenas como "extrator de características" (features),
-// congelamos seus pesos e treinamos só a camada final com as
-// suas fotos. Isso é exatamente o que o Google Teachable Machine faz.
+// ARQUITETURA: Transfer Learning com MobileNet (4 Classes)
 // ============================================================
 
 const IMAGE_SIZE = 224; // Tamanho que o MobileNet espera
 let mobileNet = null;   // Rede pré-treinada (extrator de features)
 let classifier = null;  // Nossa camada de classificação (treinável)
 
-let class1Embeddings = []; // Vetores de features extraídos das imagens da classe 1
-let class2Embeddings = []; // Vetores de features extraídos das imagens da classe 2
-let class1Images = [];
-let class2Images = [];
+// Estruturas de dados organizadas para as 4 classes
+let classEmbeddings = [[], [], [], []];
+let classImages = [[], [], [], []];
 let testImageTensor = null;
 
-// ---- UI Elements ----
-const uploadClass1 = document.getElementById('uploadClass1');
-const btnClass1 = document.getElementById('btnClass1');
-const previewClass1 = document.getElementById('previewClass1');
-const countClass1 = document.getElementById('countClass1');
+const classNames = ['Mario', 'Sonic', 'Kratos', 'Outros/Fundo'];
 
-const uploadClass2 = document.getElementById('uploadClass2');
-const btnClass2 = document.getElementById('btnClass2');
-const previewClass2 = document.getElementById('previewClass2');
-const countClass2 = document.getElementById('countClass2');
+// ---- Mapeamento dos Elementos da UI ----
+const uiElements = [1, 2, 3, 4].map(num => ({
+  upload: document.getElementById(`uploadClass${num}`),
+  btn: document.getElementById(`btnClass${num}`),
+  preview: document.getElementById(`previewClass${num}`),
+  count: document.getElementById(`countClass${num}`)
+}));
 
 const trainBtn = document.getElementById('trainBtn');
 const trainingStatus = document.getElementById('trainingStatus');
@@ -52,19 +46,22 @@ const outputContainers = {
 // ============================================================
 async function loadMobileNet() {
   trainingStatus.textContent = 'Carregando MobileNet pré-treinado...';
-  // Carregamos o MobileNet e extraímos um sub-modelo que termina
-  // na camada 'global_average_pooling2d_1' — o ponto que gera o
-  // "vetor de características" de 1280 dimensões de cada imagem.
-  const mobilenet = await tf.loadLayersModel(
-    'https://storage.googleapis.com/tfjs-models/tfjs/mobilenet_v1_0.25_224/model.json'
-  );
-  const layer = mobilenet.getLayer('conv_pw_13_relu');
-  mobileNet = tf.model({ inputs: mobilenet.inputs, outputs: layer.output });
+  try {
+    const mobilenet = await tf.loadLayersModel(
+      'https://storage.googleapis.com/tfjs-models/tfjs/mobilenet_v1_0.25_224/model.json'
+    );
+    const layer = mobilenet.getLayer('conv_pw_13_relu');
+    mobileNet = tf.model({ inputs: mobilenet.inputs, outputs: layer.output });
 
-  trainingStatus.textContent = 'MobileNet pronto! Envie suas imagens nas duas classes.';
-  trainingStatus.style.color = '#34d399';
-  btnClass1.disabled = false;
-  btnClass2.disabled = false;
+    trainingStatus.textContent = 'MobileNet pronto! Envie suas imagens nas quatro classes.';
+    trainingStatus.style.color = '#34d399';
+    
+    // Ativa os botões de upload de dados
+    uiElements.forEach(el => el.btn.disabled = false);
+  } catch (error) {
+    trainingStatus.textContent = 'Erro ao carregar o MobileNet. Verifique sua conexão.';
+    trainingStatus.style.color = '#ef4444';
+  }
 }
 loadMobileNet();
 
@@ -74,45 +71,48 @@ loadMobileNet();
 function preprocessImage(img) {
   return tf.tidy(() => {
     return tf.browser.fromPixels(img)
-      .resizeBilinear([IMAGE_SIZE, IMAGE_SIZE]) // MobileNet exige 224x224
+      .resizeBilinear([IMAGE_SIZE, IMAGE_SIZE])
       .toFloat()
       .div(127.5)
-      .sub(1)                                  // Normalização: -1 a 1 (padrão MobileNet)
-      .expandDims(0);                          // [1, 224, 224, 3]
+      .sub(1) // Normalização para o padrão do MobileNet (-1 a 1)
+      .expandDims(0);
   });
 }
 
-// Extrai o "vetor de características" de uma imagem usando o MobileNet congelado
 function extractFeatures(img) {
   return tf.tidy(() => {
     const preprocessed = preprocessImage(img);
-    return mobileNet.predict(preprocessed); // shape: [1, 7, 7, 256]
+    return mobileNet.predict(preprocessed); // Gera o shape [1, 7, 7, 256]
   });
 }
 
 // ============================================================
-// COLETA DE DADOS
+// COLETA DE DADOS (Configurando os 4 botões)
 // ============================================================
-function handleUpload(input, imageArray, embeddingArray, previewContainer, countElement) {
-  input.addEventListener('change', async (e) => {
-    const files = e.target.files;
-    for (let file of files) {
-      const img = await loadImage(file);
-      imageArray.push(img);
+function setupUploads() {
+  uiElements.forEach((el, index) => {
+    el.btn.addEventListener('click', () => el.upload.click());
 
-      // Já extrai e guarda o vetor de features (mais rápido no treino)
-      const embedding = extractFeatures(img);
-      embeddingArray.push(embedding);
+    el.upload.addEventListener('change', async (e) => {
+      const files = e.target.files;
+      for (let file of files) {
+        const img = await loadImage(file);
+        classImages[index].push(img);
 
-      const previewNode = document.createElement('img');
-      previewNode.src = URL.createObjectURL(file);
-      previewNode.className = 'image-preview';
-      previewContainer.appendChild(previewNode);
-    }
-    countElement.textContent = `${imageArray.length} imagens carregadas`;
-    checkReadyToTrain();
+        const embedding = extractFeatures(img);
+        classEmbeddings[index].push(embedding);
+
+        const previewNode = document.createElement('img');
+        previewNode.src = URL.createObjectURL(file);
+        previewNode.className = 'image-preview';
+        el.preview.appendChild(previewNode);
+      }
+      el.count.textContent = `${classImages[index].length} imagens carregadas`;
+      checkReadyToTrain();
+    });
   });
 }
+setupUploads();
 
 function loadImage(file) {
   return new Promise((resolve) => {
@@ -126,40 +126,36 @@ function loadImage(file) {
   });
 }
 
-btnClass1.addEventListener('click', () => uploadClass1.click());
-btnClass2.addEventListener('click', () => uploadClass2.click());
-handleUpload(uploadClass1, class1Images, class1Embeddings, previewClass1, countClass1);
-handleUpload(uploadClass2, class2Images, class2Embeddings, previewClass2, countClass2);
-
 function checkReadyToTrain() {
-  if (class1Images.length > 0 && class2Images.length > 0) {
+  // Verifica se todas as 4 classes possuem pelo menos uma imagem enviada
+  const allLoaded = classImages.every(arr => arr.length > 0);
+  if (allLoaded) {
     trainBtn.disabled = false;
-    trainingStatus.textContent = `Pronto! ${class1Images.length} imagens na Classe Alvo e ${class2Images.length} em Outros.`;
+    trainingStatus.textContent = 'Pronto! Imagens detectadas em todas as categorias. Pode iniciar o treino.';
     trainingStatus.style.color = '#34d399';
+  } else {
+    trainBtn.disabled = true;
+    trainingStatus.textContent = 'Envie pelo menos 1 imagem em CADA uma das 4 classes para liberar o treino.';
+    trainingStatus.style.color = '#fbbf24';
   }
 }
 
 // ============================================================
-// TREINAMENTO
-// Apenas a camada densa final é treinada. Os pesos do MobileNet
-// permanecem CONGELADOS. Isso é Transfer Learning.
+// TREINAMENTO MULTI-CLASSE (4 SAÍDAS)
 // ============================================================
 trainBtn.addEventListener('click', async () => {
   trainBtn.disabled = true;
-  btnClass1.disabled = true;
-  btnClass2.disabled = true;
-  trainingStatus.textContent = 'Construindo classificador...';
+  uiElements.forEach(el => el.btn.disabled = true);
+  trainingStatus.textContent = 'Construindo classificador de 4 classes...';
   trainingStatus.style.color = '#f8fafc';
 
-  // Descobre o shape do vetor de features gerado pelo MobileNet
-  const sampleShape = class1Embeddings[0].shape.slice(1); // ex: [7, 7, 256]
+  const sampleShape = classEmbeddings[0][0].shape.slice(1); // [7, 7, 256]
 
-  // Classificador: apenas estas camadas são treinadas do zero
   classifier = tf.sequential();
   classifier.add(tf.layers.flatten({ inputShape: sampleShape }));
   classifier.add(tf.layers.dense({ units: 64, activation: 'relu', name: 'hidden_1' }));
-  classifier.add(tf.layers.dropout({ rate: 0.3 })); // Evita memorização dos exemplos
-  classifier.add(tf.layers.dense({ units: 2, name: 'dense_out' })); // Logits
+  classifier.add(tf.layers.dropout({ rate: 0.3 }));
+  classifier.add(tf.layers.dense({ units: 4, name: 'dense_out' })); // Alterado para 4 saídas logits
   classifier.add(tf.layers.softmax({ name: 'softmax_out' }));
 
   classifier.compile({
@@ -168,19 +164,27 @@ trainBtn.addEventListener('click', async () => {
     metrics: ['accuracy']
   });
 
-  // Montar o dataset a partir dos embeddings já extraídos
-  const allEmbeddings = [...class1Embeddings, ...class2Embeddings];
-  const labels = [
-    ...class1Images.map(() => [1, 0]),
-    ...class2Images.map(() => [0, 1])
-  ];
+  // Montagem dinâmica dos dados e das labels correspondentes (One-Hot Encoding)
+  let allEmbeddings = [];
+  let labels = [];
 
-  const xs = tf.tidy(() => tf.concat(allEmbeddings.map(e => e), 0)); // [N, 7, 7, 256]
-  const ys = tf.tensor2d(labels, [labels.length, 2]);
+  classEmbeddings.forEach((embeddingsArr, classIdx) => {
+    embeddingsArr.forEach(embedding => {
+      allEmbeddings.push(embedding);
+      
+      // Cria a label no formato One-Hot (Ex: Classe 2 vira [0, 1, 0, 0])
+      let oneHot = [0, 0, 0, 0];
+      oneHot[classIdx] = 1;
+      labels.push(oneHot);
+    });
+  });
+
+  const xs = tf.tidy(() => tf.concat(allEmbeddings.map(e => e), 0));
+  const ys = tf.tensor2d(labels, [labels.length, 4]);
 
   trainProgress.classList.remove('hidden');
   lossText.classList.remove('hidden');
-  trainingStatus.textContent = 'Treinando classificador sobre os features do MobileNet...';
+  trainingStatus.textContent = 'Treinando classificador Convolucional...';
 
   const epochs = 150;
   await classifier.fit(xs, ys, {
@@ -222,9 +226,7 @@ uploadTest.addEventListener('change', async (e) => {
   ctx.drawImage(img, (canvasInput.width - w) / 2, (canvasInput.height - h) / 2, w, h);
 
   if (testImageTensor) testImageTensor.dispose();
-  testImageTensor = preprocessImage(img); // [1, 224, 224, 3]
-  // Guarda o embedding para inferência
-  testImageTensor._rawImg = img;
+  testImageTensor = preprocessImage(img);
 
   runInferenceBtn.disabled = false;
   networkVisualizer.classList.add('hidden');
@@ -235,10 +237,8 @@ runInferenceBtn.addEventListener('click', async () => {
   runInferenceBtn.disabled = true;
   networkVisualizer.classList.remove('hidden');
 
-  // Extrair features da imagem de teste via MobileNet
-  const testEmbedding = mobileNet.predict(testImageTensor); // [1, 7, 7, 256]
+  const testEmbedding = mobileNet.predict(testImageTensor);
 
-  // Interceptar os Logits brutos (antes do Softmax)
   const denseOutLayer = classifier.getLayer('dense_out');
   const logitsModel = tf.model({ inputs: classifier.inputs, outputs: denseOutLayer.output });
 
@@ -248,10 +248,9 @@ runInferenceBtn.addEventListener('click', async () => {
   const logitsData = await logitsTensor.data();
   const probsData = await finalOut.data();
 
-  // Visualizar os mapas de ativação do MobileNet (primeiros 4 canais do embedding)
+  // Visualizar as saídas das primeiras camadas da CNN
   await renderActivationMaps(testEmbedding, outputContainers.conv, 4);
 
-  // Pooling visual: reduzir o embedding pela metade (simulando max pooling)
   const pooled = tf.tidy(() => tf.maxPool(testEmbedding, 2, 2, 'valid'));
   await renderActivationMaps(pooled, outputContainers.pool, 4);
   pooled.dispose();
@@ -264,11 +263,11 @@ runInferenceBtn.addEventListener('click', async () => {
 });
 
 // ============================================================
-// RENDERIZAÇÃO
+// RENDERIZAÇÃO DAS ACTIVATION MAPS E BARRAS
 // ============================================================
 async function renderActivationMaps(tensor, container, maxFilters = 4) {
   container.innerHTML = '';
-  const shape = tensor.shape; // [1, H, W, C]
+  const shape = tensor.shape;
   const numFilters = Math.min(shape[3], maxFilters);
 
   const min = tensor.min();
@@ -286,7 +285,6 @@ async function renderActivationMaps(tensor, container, maxFilters = 4) {
 
     const wrap = document.createElement('div');
     wrap.className = 'canvas-wrapper';
-    wrap.style.margin = '0';
     wrap.appendChild(canvas);
     container.appendChild(wrap);
 
@@ -302,14 +300,13 @@ async function renderClassBars(probabilitiesTensor) {
   const container = outputContainers.class;
   container.innerHTML = '';
   const probs = await probabilitiesTensor.data();
-  const classNames = ['Sim', 'Não'];
 
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < 4; i++) {
     const p = (probs[i] * 100).toFixed(1);
     const row = document.createElement('div');
     row.className = 'class-bar-row';
     row.innerHTML = `
-      <div class="class-label" style="width: 220px; text-align: left;">${classNames[i]}</div>
+      <div class="class-label" style="width: 180px; text-align: left;">${classNames[i]}</div>
       <div class="class-track">
         <div class="class-fill" style="width: ${p}%"></div>
       </div>
@@ -325,35 +322,40 @@ function renderMathExplanation(logits, probs) {
   const mathConclusion = document.getElementById('mathConclusion');
   explanationBox.classList.remove('hidden');
 
-  const classNames = ['Sim', 'Não'];
-  const l1 = logits[0], l2 = logits[1];
-
   const formatNum = (v) => (Math.abs(v) > 9999 ? v.toExponential(2) : v.toFixed(4));
-  const e1 = Math.exp(l1), e2 = Math.exp(l2);
-  const sumE = e1 + e2;
-  const p1 = (probs[0] * 100).toFixed(1);
-  const p2 = (probs[1] * 100).toFixed(1);
+  
+  // Realiza o cálculo matemático exponencial para as 4 classes
+  let exps = logits.map(l => Math.exp(l));
+  let sumE = exps.reduce((a, b) => a + b, 0);
 
-  mathSteps.innerHTML = `
+  let stepsHtml = `
     <li>
       <strong>Passo 1 — Exponenciação dos Logits:</strong><br>
-      A rede gerou os logits brutos <code>[${formatNum(l1)}, ${formatNum(l2)}]</code>.
-      Aplica-se e<sup>x</sup> a cada um para amplificar a diferença:<br>
-      ${classNames[0]}: e<sup>${formatNum(l1)}</sup> = ${formatNum(e1)}<br>
-      ${classNames[1]}: e<sup>${formatNum(l2)}</sup> = ${formatNum(e2)}
+      A rede gerou pontuações brutas para as 4 classes.<br>
+      ${classNames.map((name, idx) => `${name}: e<sup>${formatNum(logits[idx])}</sup> = ${formatNum(exps[idx])}`).join('<br>')}
     </li>
     <li>
-      <strong>Passo 2 — Denominador comum (Σ):</strong><br>
-      ${formatNum(e1)} + ${formatNum(e2)} = <strong>${formatNum(sumE)}</strong>
+      <strong>Passo 2 — Soma dos denominadores (Σ):</strong><br>
+      Soma de todos os valores e<sup>x</sup> = <strong>${formatNum(sumE)}</strong>
     </li>
     <li>
-      <strong>Passo 3 — Probabilidade de cada classe:</strong><br>
-      ${classNames[0]}: ${formatNum(e1)} ÷ ${formatNum(sumE)} = <strong>${p1}%</strong><br>
-      ${classNames[1]}: ${formatNum(e2)} ÷ ${formatNum(sumE)} = <strong>${p2}%</strong>
+      <strong>Passo 3 — Probabilidade final (Divisão):</strong><br>
+      ${classNames.map((name, idx) => `${name}: ${formatNum(exps[idx])} ÷ ${formatNum(sumE)} = <strong>${(probs[idx] * 100).toFixed(1)}%</strong>`).join('<br>')}
     </li>
   `;
+  
+  mathSteps.innerHTML = stepsHtml;
 
-  const winnerIdx = probs[0] > probs[1] ? 0 : 1;
+  // Encontra qual classe ganhou a maior pontuação
+  let winnerIdx = 0;
+  let maxProb = 0;
+  probs.forEach((p, idx) => {
+    if (p > maxProb) {
+      maxProb = p;
+      winnerIdx = idx;
+    }
+  });
+
   const winnerProb = (probs[winnerIdx] * 100).toFixed(1);
-  mathConclusion.innerHTML = `Os logits <code>[${formatNum(l1)}, ${formatNum(l2)}]</code> após o Softmax resultam em <strong>${winnerProb}%</strong> de confiança na classe <strong>${classNames[winnerIdx]}</strong>.`;
+  mathConclusion.innerHTML = `Resultado: O modelo possui <strong>${winnerProb}%</strong> de confiança de que a imagem de teste pertence à categoria: <strong>${classNames[winnerIdx]}</strong>.`;
 }
